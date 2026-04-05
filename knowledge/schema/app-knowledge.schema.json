@@ -1,0 +1,284 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "app-knowledge.schema.json",
+  "title": "AutoPilot QA — App Knowledge File",
+  "description": "Validates the structure and types of an app-knowledge.yaml file consumed by the Kryptonite pipeline.",
+  "type": "object",
+  "required": ["application"],
+  "additionalProperties": false,
+  "properties": {
+
+    "application": {
+      "type": "object",
+      "description": "Core metadata about the target application.",
+      "required": ["name", "type", "base_url"],
+      "additionalProperties": true,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable application name."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Short description of the application."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["web", "api", "mobile"],
+          "description": "Application category."
+        },
+        "base_url": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Root URL of the running application (http/https validated semantically)."
+        },
+        "swagger_url": {
+          "description": "URL to an OpenAPI / Swagger spec, if available. Null is allowed.",
+          "oneOf": [
+            {"type": "string", "minLength": 1},
+            {"type": "null"}
+          ]
+        }
+      }
+    },
+
+    "authentication": {
+      "type": "object",
+      "description": "Auth configuration for the application.",
+      "required": ["type"],
+      "additionalProperties": true,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["form", "oauth2", "saml", "basic", "token", "none"],
+          "description": "Authentication mechanism."
+        },
+        "login_url": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Path or URL of the login page/endpoint. Required when type != 'none'."
+        },
+        "logout_url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "token_endpoint": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+
+    "domain": {
+      "type": "object",
+      "description": "Business domain model.",
+      "additionalProperties": true,
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "entities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "key_fields"],
+            "additionalProperties": true,
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Entity class name (e.g. WishList)."
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1
+              },
+              "key_fields": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": "Non-empty list of field names that identify this entity."
+              },
+              "valid_states": {
+                "type": "object",
+                "description": "Map of field name → allowed values."
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "routes": {
+      "type": "array",
+      "description": "UI routes / pages in the application.",
+      "items": {
+        "type": "object",
+        "required": ["path", "title"],
+        "additionalProperties": true,
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Route path — must start with '/' (validated semantically)."
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Human-readable page title."
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "auth_required": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+
+    "api_endpoints": {
+      "type": "array",
+      "description": "Backend API endpoints.",
+      "items": {
+        "type": "object",
+        "required": ["method", "path", "description"],
+        "additionalProperties": true,
+        "properties": {
+          "method": {
+            "type": "string",
+            "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+            "description": "HTTP method."
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "API path — must start with '/' (validated semantically)."
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "request_body": {
+            "type": "object",
+            "description": "Informal map of field → type description."
+          },
+          "query_params": {
+            "type": "object",
+            "description": "Informal map of param name → type description."
+          },
+          "response": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Prose description of the response shape."
+          },
+          "auth_required": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+
+    "journeys": {
+      "type": "array",
+      "description": "End-to-end user journeys / test scenarios.",
+      "items": {
+        "type": "object",
+        "required": ["name", "steps", "priority"],
+        "additionalProperties": true,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Short, unique journey name."
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "priority": {
+            "type": "string",
+            "enum": ["smoke", "regression", "e2e"],
+            "description": "Test classification tag."
+          },
+          "steps": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Ordered list of plain-language step descriptions."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+
+    "test_data": {
+      "type": "object",
+      "description": "Environment configurations and sample input values.",
+      "additionalProperties": true,
+      "properties": {
+        "environments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "base_url"],
+            "additionalProperties": true,
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Environment label (e.g. local, staging)."
+              },
+              "base_url": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Root URL for this environment (http/https validated semantically)."
+              },
+              "data_reset": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "sample_inputs": {
+          "type": "object",
+          "description": "Arbitrary map of input category → list of sample values."
+        }
+      }
+    },
+
+    "exclusions": {
+      "type": "array",
+      "description": "Paths or patterns to skip during crawling/testing.",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+
+    "notes": {
+      "type": "array",
+      "description": "Free-form notes for human readers and AI agents.",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}

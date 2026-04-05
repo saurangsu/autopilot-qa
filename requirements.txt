@@ -1,0 +1,12 @@
+# AutoPilot QA v0.1 — minimal dependencies
+# Install: pip install -r requirements.txt
+# (or use the existing .venv: .venv/bin/pip install -r requirements.txt)
+
+anthropic>=0.40         # Claude API client
+pyyaml>=6.0             # YAML parsing for app-knowledge.yaml
+
+# ── Future add-ons (uncomment when enabling those modules) ───────────────────
+# playwright>=1.40      # crawler add-on (crawl_agent.py)
+# beautifulsoup4>=4.12  # extract add-on (extract_agent.py)
+# langgraph>=0.1        # multi-agent orchestration (graph.py)
+# jsonschema>=4.17      # knowledge file schema validation

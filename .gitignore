@@ -1,0 +1,39 @@
+# ── Generated output (regenerated on demand) ─────────────────────────────────
+output/
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+*.egg-info/
+dist/
+build/
+
+# ── Secrets ───────────────────────────────────────────────────────────────────
+.env
+*.env.local
+.env.*
+
+# ── Personal / planning docs (not for public repo) ───────────────────────────
+strategy_v01.md
+Kryptonite.md
+baby steps.rtf
+baby steps.rtf.sb-4faeb016-RiAar2
+
+# ── Old pipeline files (pre-pivot, not part of v0.1) ─────────────────────────
+crawler/
+pom.xml
+src/
+target/
+
+# ── Claude Code settings ──────────────────────────────────────────────────────
+.claude/
+
+# ── macOS ─────────────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+
+# ── Misc artefacts ────────────────────────────────────────────────────────────
+=6.0
+*.rtf.sb-*

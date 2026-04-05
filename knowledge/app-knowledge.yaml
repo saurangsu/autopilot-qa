@@ -1,0 +1,282 @@
+# app-knowledge.yaml — Gift List App
+# Target: http://localhost:3000
+# Source: /Users/saurangsu/projects/saurangsu/gift-list/
+# Last verified: 2026-03-27 against actual source code
+
+application:
+  name: "Gift List App"
+  description: "A Next.js web app where users create personalised wish lists with AI-powered gift suggestions. Wishers describe an occasion and receive trending gift ideas; they can also add items manually or via product search. Lists are shared with gifters via a unique link; gifters can claim items to signal their intent to purchase."
+  type: web
+  base_url: "http://localhost:3000"
+  swagger_url: null  # No OpenAPI spec — Next.js API routes
+
+authentication:
+  type: none  # No login/auth in current version
+
+domain:
+  description: "Gift-list management platform. A wisher creates a list for an occasion, picks AI-suggested or manually entered items, and shares a read-only link with gifters. Gifters can claim items to coordinate purchases."
+  entities:
+    - name: GiftList
+      description: "A named collection of desired gifts for a specific occasion"
+      key_fields: [id, title, description, event_date, share_id, created_at, updated_at]
+
+    - name: GiftItem
+      description: "A single gift item on a wish list — can be AI-sourced, search-sourced, or manually entered"
+      key_fields: [id, list_id, name, retail_url, price, notes, is_claimed, quality_analysis, created_at]
+      valid_states:
+        is_claimed: [0, 1]   # 0 = unclaimed, 1 = claimed by a gifter
+
+    - name: TrendingSuggestion
+      description: "An AI-generated gift idea returned by the /api/suggest endpoint"
+      key_fields: [name, price, oldPrice, imageUrl, productUrl, source, description, whyGreat, rating, reviews, onSale, tag]
+
+    - name: ProductSuggestion
+      description: "A product search result returned by the /api/search endpoint"
+      key_fields: [name, estimatedPrice, retailer, retailUrl, description]
+
+routes:
+  - path: "/"
+    title: "Home"
+    description: "Landing page with two cards — 'I'm wishing' (active, links to /wisher) and 'I'm gifting' (disabled, 'Coming soon' badge, cursor-not-allowed). No navigation or interaction on the gifting card."
+
+  - path: "/wisher"
+    title: "Create Wish List"
+    description: "Two-phase flow. Phase 1: occasion field (required) + context field (optional), submits to POST /api/suggest. Phase 2: shows AI suggestion grid (selectable cards) + search-first 'Add Your Own' section (POST /api/search) + manual item entry form. Wisher fills in list title and clicks 'Create List' (POST /api/lists then POST /api/lists/{id}/items per selected/added item). Redirects to /list/{id} on success."
+
+  - path: "/list/[id]"
+    title: "Wish List Detail"
+    description: "Shows a specific wish list title and all its items. Two add-item modes toggled by tabs: 'Search' (calls POST /api/search, results clickable to add) and 'Manual Entry' (name required, retailUrl/price/notes optional). Each item has an 'Analyse' button (POST /api/lists/{id}/items/{itemId}/analyze) and a 'Delete' button. 'Share' button copies the share URL to clipboard. Analysis result renders markdown (** bold **) via innerHTML."
+
+  - path: "/shared/[shareId]"
+    title: "Shared List View"
+    description: "View of a wish list for gifters, accessed via share link. Shows list title, description, event date. Items show name, price, retail URL ('Buy this item →'), notes, is_claimed status (strikethrough + 'Claimed' badge), and optional quality analysis accordion. Each item has a 'I'll get this!' / 'Unclaim' toggle button that calls PATCH /api/lists/{id}/items/{itemId} with { is_claimed: true/false }. This page is NOT read-only — gifters can claim and unclaim items."
+
+api_endpoints:
+  - method: GET
+    path: "/api/lists"
+    description: "Returns all GiftLists ordered by created_at descending."
+    response: "Array of GiftList"
+
+  - method: POST
+    path: "/api/lists"
+    description: "Creates a new GiftList. title is required; description and eventDate are optional. Returns the created list with id and share_id."
+    request_body:
+      title: string       # required
+      description: string # optional
+      eventDate: string   # optional ISO date
+    response: "GiftList (201)"
+    errors:
+      400: "Title is required"
+
+  - method: GET
+    path: "/api/lists/{id}"
+    description: "Returns a single GiftList by id."
+    response: "GiftList"
+    errors:
+      404: "List not found"
+
+  - method: GET
+    path: "/api/lists/{id}/items"
+    description: "Returns all GiftItems for the list ordered by created_at ascending."
+    response: "Array of GiftItem"
+    errors:
+      404: "List not found"
+
+  - method: POST
+    path: "/api/lists/{id}/items"
+    description: "Adds a GiftItem to the list. name is required; retailUrl, price, notes are optional."
+    request_body:
+      name: string      # required
+      retailUrl: string # optional
+      price: number     # optional
+      notes: string     # optional
+    response: "GiftItem (201)"
+    errors:
+      400: "Item name is required"
+      404: "List not found"
+
+  - method: DELETE
+    path: "/api/lists/{id}/items/{itemId}"
+    description: "Deletes a GiftItem. Returns { ok: true }."
+    response: "{ ok: true }"
+
+  - method: PATCH
+    path: "/api/lists/{id}/items/{itemId}"
+    description: "Claims or unclaims a GiftItem. Send { is_claimed: true } to claim, { is_claimed: false } to unclaim. Returns the updated GiftItem."
+    request_body:
+      is_claimed: boolean   # true = claim, false = unclaim
+    response: "GiftItem (updated)"
+
+  - method: POST
+    path: "/api/suggest"
+    description: "Accepts occasion (required string) and context (optional string). Returns AI-generated gift suggestions. Results are cached by occasion+context for 2 hours."
+    request_body:
+      occasion: string  # required, e.g. '30th Birthday'
+      context: string   # optional, e.g. 'loves hiking, budget ~£100'
+    response: "{ suggestions: TrendingSuggestion[], cached?: boolean }"
+    errors:
+      400: "Occasion is required"
+      500: "Failed to generate suggestions"
+
+  - method: POST
+    path: "/api/search"
+    description: "Searches for gift products by query string. query is required. Returns product suggestions."
+    request_body:
+      query: string   # required
+    response: "{ results: ProductSuggestion[] }"
+    errors:
+      400: "Search query is required"
+      500: "Failed to search for products"
+
+  - method: POST
+    path: "/api/lists/{id}/items/{itemId}/analyze"
+    description: "Triggers AI quality analysis of a specific item using item name and retail_url. Stores result in quality_analysis field. Returns { analysis: string } where analysis is markdown text (** bold ** syntax)."
+    response: "{ analysis: string }"
+    errors:
+      404: "Item not found"
+      500: "Analysis failed"
+
+  - method: GET
+    path: "/api/shared/{shareId}"
+    description: "Returns the GiftList and all its GiftItems for the shared view. Looks up list by share_id not id."
+    response: "{ list: GiftList, items: GiftItem[] }"
+    errors:
+      404: "List not found"
+
+journeys:
+  - name: "Create a Wish List via AI suggestions (full wisher flow)"
+    description: "Wisher goes from home to a published wish list via the AI-assisted creation flow"
+    steps:
+      - navigate to /
+      - click 'I'm wishing' card
+      - fill in occasion field (e.g. '30th Birthday')
+      - optionally fill in context field
+      - click 'Find Gifts' button to submit Phase 1
+      - wait for AI suggestions grid to load (POST /api/suggest — can be slow)
+      - select one or more suggestion cards
+      - fill in the list title field
+      - click 'Create List'
+      - verify redirect to /list/{id}
+      - verify list title and selected items are displayed
+    priority: smoke
+
+  - name: "Home page — gifting card is disabled"
+    description: "Verify the 'I'm gifting' card is non-interactive (coming soon state)"
+    steps:
+      - navigate to /
+      - verify 'I'm gifting' card displays 'Coming soon' badge
+      - verify card has cursor-not-allowed styling
+      - click card and verify no navigation occurs (stays on /)
+    priority: smoke
+
+  - name: "Add item to existing list via product search"
+    description: "On the list detail page, search for a product and add it to the list"
+    steps:
+      - navigate to /list/{id}
+      - verify 'Search' tab is active by default
+      - type a product name in the search box (e.g. 'hiking boots')
+      - submit the search form
+      - wait for product suggestions to appear (POST /api/search)
+      - click a suggested product
+      - verify item appears in the list
+    priority: regression
+
+  - name: "Add item to existing list manually"
+    description: "On the list detail page, manually enter an item and add it"
+    steps:
+      - navigate to /list/{id}
+      - click 'Manual Entry' tab
+      - fill in item name (required, e.g. 'Coffee maker')
+      - optionally fill retail URL, price, notes
+      - click 'Add Item'
+      - verify item appears in the list
+    priority: regression
+
+  - name: "Delete an item from a list"
+    description: "Wisher removes an item from their list detail page"
+    steps:
+      - navigate to /list/{id} with at least one item
+      - click the Delete button on an item
+      - verify item is removed from the list (DELETE /api/lists/{id}/items/{itemId})
+    priority: regression
+
+  - name: "Share a wish list"
+    description: "Copy the share link from a list detail page and navigate to shared view"
+    steps:
+      - navigate to /list/{id}
+      - click 'Share' button
+      - verify shareable URL is copied to clipboard
+      - navigate to /shared/{shareId}
+      - verify list title, description, and items are visible
+      - verify 'I'll get this!' button is present on unclaimed items
+    priority: regression
+
+  - name: "Gifter claims an item"
+    description: "Gifter opens shared list, claims an item, and verifies claimed state"
+    steps:
+      - navigate to /shared/{shareId}
+      - verify item shows 'I'll get this!' button (is_claimed = 0)
+      - click 'I'll get this!' on an unclaimed item
+      - verify item shows 'Claimed' badge and strikethrough name
+      - verify button changes to 'Unclaim'
+      - verify PATCH /api/lists/{id}/items/{itemId} was called with { is_claimed: true }
+    priority: regression
+
+  - name: "Gifter unclaims an item"
+    description: "Gifter reverses a claim on the shared list"
+    steps:
+      - navigate to /shared/{shareId} where at least one item is claimed
+      - click 'Unclaim' on a claimed item
+      - verify 'Claimed' badge and strikethrough are removed
+      - verify button reverts to 'I'll get this!'
+    priority: regression
+
+  - name: "Analyse a gift item"
+    description: "Trigger AI quality analysis on an item in the list detail view"
+    steps:
+      - navigate to /list/{id} with at least one item
+      - click the 'Analyse' button on an item
+      - wait for analysis result to appear (POST /api/lists/{id}/items/{itemId}/analyze)
+      - verify analysis text is displayed (markdown rendered, bold text visible)
+    priority: regression
+
+test_data:
+  environments:
+    - name: local
+      base_url: "http://localhost:3000"
+      data_reset: true   # local dev — SQLite db can be reset between runs
+
+  sample_inputs:
+    occasions:
+      - "30th Birthday"
+      - "Wedding Anniversary"
+      - "Christmas"
+    context_examples:
+      - "Loves hiking, budget around £50"
+      - "Enjoys cooking, age 45"
+    item_names:
+      - "Hiking boots"
+      - "Coffee maker"
+      - "Kindle Paperwhite"
+    list_titles:
+      - "Sarah's Birthday Wishlist"
+      - "Our Anniversary List"
+
+exclusions:
+  - "GET /api/lists — internal use only, no UI surface to test via browser"
+  - "'I'm gifting' card flow — not yet implemented, only verify it is disabled"
+
+notes:
+  - "No authentication required in any current flow"
+  - "The wisher flow is two-phase: Phase 1 (intake) then Phase 2 (builder) — do not skip Phase 1"
+  - "POST /api/suggest is a slow AI call — add explicit wait (up to 30s) for suggestions grid to appear"
+  - "POST /api/suggest results are cached for 2 hours by occasion+context — repeat calls with same inputs return instantly"
+  - "POST /api/search also calls an external AI/shopping API — may be slow"
+  - "Share URL is the app base URL + /shared/{share_id} — share_id is returned when creating the list"
+  - "Share button copies URL to clipboard — clipboard assertion needs browser permission or workaround in headless mode"
+  - "quality_analysis is stored as markdown with ** bold ** syntax, rendered via innerHTML with regex replacement on the frontend"
+  - "GiftItem fields in the DB and API responses use snake_case (retail_url, list_id, is_claimed, quality_analysis)"
+  - "is_claimed is stored as INTEGER 0/1 in SQLite, returned as number in JSON"
+  - "List IDs and share IDs are UUIDs generated server-side; capture from redirect URL after list creation"
+  - "Tech stack: Next.js 14+ App Router, TypeScript, Tailwind CSS, SQLite (better-sqlite3)"
+  - "Shared list view (/shared/{shareId}) is NOT read-only — gifters can claim/unclaim items"
