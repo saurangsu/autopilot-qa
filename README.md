@@ -6,6 +6,8 @@ AutoPilot QA reads an **Application Knowledge File** (a YAML description of your
 app's pages, APIs, user journeys, and domain entities) and uses the Claude API
 to generate comprehensive **manual test scenarios** in Markdown.
 
+The AKF (Application Knowledge File) is the backbone for this utility. It's essentially passing over accplication knowledge as part of context to the LLM.
+
 No browser. No live app access. No boilerplate to write.
 
 ---
