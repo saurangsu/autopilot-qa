@@ -15,6 +15,9 @@ build/
 *.env.local
 .env.*
 
+# ── User-specific config (contains local paths and personal descriptions) ────
+knowledge-config.yaml
+
 # ── Personal / planning docs (not for public repo) ───────────────────────────
 strategy_v01.md
 Kryptonite.md

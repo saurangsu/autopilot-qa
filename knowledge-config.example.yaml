@@ -1,0 +1,83 @@
+# knowledge-config.yaml — single control point for app-knowledge.yaml generation
+#
+# Configure which sources AutoPilot QA uses to understand your application.
+# Enable/disable each source independently. All enabled sources are combined
+# and fed to Claude, which produces the app-knowledge.yaml file.
+#
+# Run:
+#   python run.py --build-knowledge knowledge-config.yaml
+#   python run.py --build-knowledge knowledge-config.yaml --review   # full pipeline
+
+# Where to write the generated knowledge file
+output: knowledge/app-knowledge.yaml
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SOURCE 1 — Human prompt
+# The most important input. Describe what the app does, who uses it,
+# key workflows, technology stack, anything a new tester should know.
+# ─────────────────────────────────────────────────────────────────────────────
+prompt:
+  enabled: true
+  text: |
+    Replace this with a description of your application.
+
+    Include:
+    - What the app does and who uses it
+    - The key user workflows (e.g. "a wisher creates a list, shares it with gifters")
+    - Technology stack (e.g. Next.js, Django, Rails)
+    - Authentication mechanism (or "no auth")
+    - Anything a tester should know (slow endpoints, known quirks, what's out of scope)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SOURCE 2 — Source code repository
+# AutoPilot QA reads your source files to discover routes, API endpoints,
+# domain entities, and request/response shapes automatically.
+#
+# type: local   — read from a directory on this machine
+# type: github  — read from a GitHub repository (requires `gh` CLI + auth)
+# ─────────────────────────────────────────────────────────────────────────────
+repo:
+  enabled: false
+  type: local             # local | github
+
+  # For type: local — path to your project root (absolute or relative to this file)
+  path: ../my-app
+
+  # For type: github — full GitHub URL
+  # github_url: https://github.com/owner/repo
+
+  # Glob patterns to include (relative to repo root)
+  # Tip: prioritise API routes, page components, and type/model definitions
+  patterns:
+    - "src/app/api/**/*.ts"
+    - "src/app/**/*.tsx"
+    - "src/lib/**/*.ts"
+    - "src/**/*.py"         # for Python/Django/Flask
+    # - "app/controllers/**/*.rb"  # Rails
+    # - "routes/**/*.js"           # Express
+
+  # Patterns to exclude
+  exclude:
+    - "node_modules/**"
+    - ".next/**"
+    - "**/*.test.*"
+    - "**/*.spec.*"
+    - "**/__tests__/**"
+    - "dist/**"
+    - "build/**"
+
+  # Maximum number of files to read (keeps context window manageable)
+  max_files: 40
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SOURCE 3 — Additional documentation
+# Any other files that help describe the app: README, API spec, Jira stories,
+# design docs, OpenAPI YAML, etc. List as many as you need.
+# ─────────────────────────────────────────────────────────────────────────────
+docs:
+  enabled: false
+  files:
+    - path: README.md
+    # - path: docs/api-spec.md
+    # - path: jira_requirements.txt
+    # - path: openapi.yaml

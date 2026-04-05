@@ -416,3 +416,153 @@ def build_reviewer_prompt(knowledge: dict, draft_content: str) -> str:
         "Output the Review Summary first, then the complete finalized scenario set.",
         "Renumber all scenarios starting from TC-001 in the finalized set.",
     ])
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# KNOWLEDGE BUILDER AGENT PROMPTS
+# ─────────────────────────────────────────────────────────────────────────────
+# The Knowledge Builder reads context from up to three sources (human prompt,
+# source code, documentation) and produces an app-knowledge.yaml file.
+#
+# DESIGN DECISION: Include the schema in the system prompt
+# ─────────────────────────────────────────────────────────
+# We embed a condensed version of the app-knowledge.yaml schema directly in
+# the system prompt rather than relying on Claude's general knowledge of the
+# format. This ensures:
+#   - The output conforms to the expected structure even for unusual apps
+#   - Required fields (application.name, application.type, etc.) are always present
+#   - Claude knows the allowed enum values (auth types, HTTP methods, priorities)
+#
+# DESIGN DECISION: Output raw YAML, not markdown
+# ───────────────────────────────────────────────
+# We explicitly tell Claude to output ONLY valid YAML with no markdown fences
+# or explanation text. The knowledge_builder.py code strips accidental fences
+# as a safety net, then validates the YAML is parseable before writing to disk.
+#
+# DESIGN DECISION: Source trust hierarchy
+# ─────────────────────────────────────────
+# When sources conflict (e.g. the human says "no auth" but the code shows a
+# login route), Claude is told to prefer in this order:
+#   1. Human prompt   — captures intent and known quirks
+#   2. Source code    — ground truth for what actually exists
+#   3. Documentation  — may be outdated, use to fill gaps only
+# ═════════════════════════════════════════════════════════════════════════════
+
+KNOWLEDGE_BUILDER_SYSTEM_PROMPT = """You are a software architect and QA expert. Your job is to analyse application source code, human descriptions, and documentation, then produce a well-structured app-knowledge.yaml file that accurately captures the application's structure for test scenario generation.
+
+## Output rules
+- Output ONLY valid YAML. No markdown fences (no ```yaml). No explanation text before or after.
+- Start your response with the first line of YAML content (e.g. `application:` or a comment `#`).
+- Do not invent routes, endpoints, or behaviours that are not evidenced in the provided sources.
+- If a field's value is unknown, omit it rather than guessing.
+
+## Source trust hierarchy
+When sources conflict, prefer in this order:
+  1. Human prompt — sets intent and captures known quirks not visible in code
+  2. Source code — ground truth for what actually exists
+  3. Documentation — use to fill gaps; may be outdated
+
+## app-knowledge.yaml schema (produce output that conforms to this)
+
+```
+application:           # REQUIRED
+  name: string         # REQUIRED — human-readable app name
+  description: string  # what the app does
+  type: string         # REQUIRED — one of: web | api | mobile
+  base_url: string     # REQUIRED — e.g. http://localhost:3000
+  swagger_url: string|null
+
+authentication:        # REQUIRED
+  type: string         # REQUIRED — one of: form | oauth2 | saml | basic | token | none
+  login_url: string    # required if type != none
+  credentials_env:     # map of role → env var name
+
+domain:
+  description: string
+  entities:
+    - name: string         # REQUIRED
+      description: string
+      key_fields: [string] # REQUIRED — list of field names
+      valid_states:        # map of field → list of allowed values
+
+routes:
+  - path: string       # REQUIRED — must start with /
+    title: string      # REQUIRED
+    description: string
+    auth_required: boolean
+
+api_endpoints:
+  - method: string     # REQUIRED — GET|POST|PUT|PATCH|DELETE
+    path: string       # REQUIRED — must start with /
+    description: string  # REQUIRED
+    request_body:      # map of field → type description
+    query_params:      # map of param → type description
+    response: string   # prose description of response shape
+    errors:            # map of status code → message
+
+journeys:
+  - name: string       # REQUIRED
+    description: string
+    priority: string   # REQUIRED — one of: smoke | regression | e2e
+    steps: [string]    # REQUIRED — ordered plain-language steps
+
+test_data:
+  environments:
+    - name: string     # REQUIRED
+      base_url: string # REQUIRED
+      data_reset: boolean
+  sample_inputs:       # map of category → list of sample values
+
+exclusions: [string]   # paths or features to skip
+notes: [string]        # important notes for testers
+```
+
+## What to populate
+- Extract every UI route/page you can identify from source or docs
+- Extract every API endpoint with its HTTP method, path, and request/response shape
+- Identify domain entities from type definitions, database schemas, or models
+- Derive user journeys from the app's primary workflows — what can a user actually do?
+- Note anything that could affect testability: async operations, caching, auth, known bugs
+"""
+
+
+def build_knowledge_prompt(sources: dict[str, str]) -> str:
+    """Assemble the user prompt from collected sources.
+
+    Sources dict has keys: 'prompt', 'repo', 'docs'.
+    Empty strings mean that source was not enabled.
+    """
+    lines = []
+
+    if sources.get("prompt", "").strip():
+        lines += [
+            "## Source 1 — Human Description (highest trust)",
+            "",
+            sources["prompt"].strip(),
+            "",
+        ]
+
+    if sources.get("repo", "").strip():
+        lines += [
+            "## Source 2 — Source Code",
+            "",
+            sources["repo"].strip(),
+            "",
+        ]
+
+    if sources.get("docs", "").strip():
+        lines += [
+            "## Source 3 — Documentation",
+            "",
+            sources["docs"].strip(),
+            "",
+        ]
+
+    lines += [
+        "---",
+        "",
+        "Using the sources above, generate the app-knowledge.yaml file.",
+        "Output only valid YAML. No markdown fences. No explanation text.",
+    ]
+
+    return "\n".join(lines)

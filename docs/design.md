@@ -322,6 +322,68 @@ truth; the draft is the thing being evaluated against it.
 
 ---
 
+## ADR-006: Knowledge Builder — config file as single control point
+
+**Decision:** The Knowledge Builder is driven by a `knowledge-config.yaml` file
+(the "single control point"), not by CLI flags.
+
+**Why:**
+
+The builder takes up to three sources: a human prompt, a source repo, and
+multiple documentation files. That's too many inputs to express cleanly as CLI
+flags. A config file is:
+- **Version-controllable** — you can see exactly what inputs produced a given
+  knowledge file, and re-run it identically.
+- **Shareable** — a team can agree on the config and each member regenerates
+  locally.
+- **Readable** — enabling/disabling sources is a one-line `enabled: true/false`,
+  not a flag combinatoric.
+
+The `knowledge-config.yaml` is gitignored (contains local paths and personal
+descriptions). The `knowledge-config.example.yaml` is committed — same pattern
+as `.env` / `.env.example`.
+
+---
+
+## ADR-007: Source trust hierarchy
+
+**Decision:** When sources conflict, Claude prefers them in this order:
+1. Human prompt (highest trust)
+2. Source code (ground truth)
+3. Documentation (supplementary, may be outdated)
+
+**Why:**
+
+The human prompt captures *intent* — what the app is supposed to do, including
+known quirks and things not visible in code. Source code is the authoritative
+ground truth for what actually exists. Documentation is often the least reliable
+(can lag behind the code by months).
+
+This hierarchy is stated explicitly in the Knowledge Builder system prompt so
+Claude applies it when sources conflict — e.g., if the README says "no auth"
+but the source code has a login route, Claude flags it rather than silently
+picking one.
+
+---
+
+## ADR-008: Repo file prioritisation
+
+**Decision:** When reading a source repo, files are sorted before reading:
+API routes → page/view components → lib/model/db files → everything else.
+
+**Why:**
+
+Repos can have hundreds of files. The `max_files` cap (default: 40) means we
+must choose which files make it into the context window. API routes and page
+components contain the most test-relevant information (endpoints, routes, request
+shapes, UI interactions). Sorting by relevance ensures these always make it in,
+even for large monorepos.
+
+This is implemented in `knowledge_builder.py` via the `priority()` function that
+scores file paths by keyword matching.
+
+---
+
 ## Running AutoPilot QA
 
 ```bash
@@ -331,18 +393,21 @@ pip install -r requirements.txt
 # 2. Set your Anthropic API key
 export ANTHROPIC_API_KEY=sk-ant-...
 
-# 3a. Generate only
-python run.py knowledge/app-knowledge.yaml
-# → output/test-scenarios.md
+# 3. Copy the config template
+cp knowledge-config.example.yaml knowledge-config.yaml
+# Edit knowledge-config.yaml — enable your sources, fill in paths/descriptions
 
-# 3b. Full two-agent pipeline (recommended)
+# 4a. Full three-agent pipeline (recommended)
+python run.py --build-knowledge knowledge-config.yaml --review
+# → knowledge/app-knowledge.yaml   (Knowledge Builder output)
+# → output/draft-scenarios.md      (Generator output)
+# → output/test-scenarios-final.md (Reviewer output — use this)
+
+# 4b. Build knowledge only
+python run.py --build-knowledge knowledge-config.yaml
+
+# 4c. Skip knowledge building (use existing knowledge file)
 python run.py knowledge/app-knowledge.yaml --review
-# → output/draft-scenarios.md  (generator output)
-# → output/test-scenarios-final.md  (reviewer output, use this)
-
-# 3c. Review an existing draft without regenerating
-python run.py knowledge/app-knowledge.yaml --review-only output/draft-scenarios.md
-# → output/test-scenarios-final.md
 ```
 
 ---
