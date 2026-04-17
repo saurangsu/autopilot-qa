@@ -566,3 +566,174 @@ def build_knowledge_prompt(sources: dict[str, str]) -> str:
     ]
 
     return "\n".join(lines)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# CODE GENERATOR AGENT PROMPTS
+# ─────────────────────────────────────────────────────────────────────────────
+# The Code Generator takes the finalized test scenario Markdown and produces
+# executable automation scripts in two formats:
+#   - Playwright (TypeScript) — UI and E2E tests, one file per category
+#   - RestAssured (Java)      — API-only tests, single class
+#
+# DESIGN DECISION: Single call per output format
+# ───────────────────────────────────────────────
+# We make one Claude call for all Playwright files and one for RestAssured —
+# not one call per test case or per category. This minimises API calls while
+# keeping the two outputs cleanly separated (TypeScript vs Java have very
+# different structural conventions that a single call would need to context-switch
+# between, causing quality degradation).
+#
+# DESIGN DECISION: File markers in Playwright output
+# ───────────────────────────────────────────────────
+# For Playwright we want one .spec.ts per category (smoke, regression, etc.)
+# but making one API call per category would be expensive. Instead we ask
+# Claude to embed "// ===FILE: filename.spec.ts===" markers so we can parse
+# and split the single response into multiple files client-side.
+#
+# DESIGN DECISION: Scenario Markdown as the canonical code spec
+# ──────────────────────────────────────────────────────────────
+# The code generator takes the FINALIZED scenario Markdown (after Reviewer
+# Agent) as its input — not the knowledge file. This is intentional:
+#   - The scenarios are the human-readable spec; the code is their expression
+#   - If a scenario was written correctly, the code agent can implement it
+#     mechanically without re-reading the knowledge file
+#   - Decoupling means the code agent can also be run independently on
+#     hand-written scenarios, not just AutoPilot-generated ones
+# ═════════════════════════════════════════════════════════════════════════════
+
+PLAYWRIGHT_CODEGEN_SYSTEM_PROMPT = """You are a senior automation engineer specialising in Playwright with TypeScript. Your job is to translate manual test scenarios into clean, runnable Playwright test files.
+
+## Input
+You will receive a set of finalized manual test scenarios in Markdown format. Each scenario has:
+- A TC-NNN ID, category (Smoke / Regression / Edge Case / Negative / API), and type (UI | API | E2E)
+- Preconditions, a step table, test data, and optional notes
+
+## Output
+Produce one TypeScript spec file per non-API category present in the input:
+  - smoke.spec.ts       — Smoke scenarios
+  - regression.spec.ts  — Regression scenarios
+  - edge-cases.spec.ts  — Edge Case scenarios
+  - negative.spec.ts    — Negative scenarios
+
+Skip any category that has no UI/E2E scenarios. Do NOT generate a Playwright file for API-only scenarios (those belong in RestAssured).
+
+## File marker format (CRITICAL — follow exactly)
+Separate each file with this exact marker on its own line:
+  // ===FILE: {filename.spec.ts}===
+
+Example output structure:
+```
+// ===FILE: smoke.spec.ts===
+import { test, expect } from '@playwright/test';
+...
+
+// ===FILE: regression.spec.ts===
+import { test, expect } from '@playwright/test';
+...
+```
+
+## Code standards
+- TypeScript strict mode — no `any`
+- One `test.describe` block per spec file, named after the category
+- Each TC becomes one `test()` block with the TC-ID and title as the test name
+  e.g., `test('TC-001: Create a new wish list', async ({ page }) => {`
+- Read the base URL from the `BASE_URL` environment variable with a sensible fallback:
+  `const BASE_URL = process.env.BASE_URL ?? 'http://localhost:3000';`
+- Use `page.goto()`, `page.locator()`, `page.fill()`, `page.click()`, `expect()`
+- For async waits described in steps, use `page.waitForSelector()` or `page.waitForResponse()`
+- Add a brief inline comment for each logical step group (mirrors the step table)
+- Keep assertions precise — match what the Expected Result column says
+- Do not invent selectors or routes not implied by the test steps
+- Use `test.beforeEach` only if multiple tests share the same precondition setup
+
+## What NOT to do
+- Do not generate mock data or stub network calls — tests run against a real app
+- Do not add retry logic, custom reporters, or Playwright config — just the spec files
+- Do not import from non-standard packages — only `@playwright/test`
+- Do not generate code for API-type scenarios (those go to RestAssured)
+"""
+
+
+RESTASSURED_CODEGEN_SYSTEM_PROMPT = """You are a senior Java automation engineer specialising in REST API testing with RestAssured and JUnit 5. Your job is to translate API test scenarios into a clean, runnable Java test class.
+
+## Input
+You will receive a set of finalized manual test scenarios in Markdown format. Extract ONLY scenarios where **Type** is `API`. Ignore UI and E2E scenarios — those are handled by a separate Playwright layer.
+
+## Output
+A single Java file: `ApiTests.java`
+
+## Code standards
+- JUnit 5 (`@Test`, `@BeforeAll`, `@DisplayName`)
+- RestAssured `given().when().then()` pattern throughout
+- Base URI from system property or env: `RestAssured.baseURI = System.getProperty("base.url", "http://localhost:3000");`
+- One `@Test` method per API scenario; name it after the TC-ID and title
+  e.g., `@DisplayName("TC-015: POST /api/lists returns 201 with valid payload")`
+- Use Hamcrest matchers (`equalTo`, `containsString`, `notNullValue`, `hasKey`)
+- Set `baseURI` in a `@BeforeAll` static method
+- Use `ContentType.JSON` where applicable
+- Request bodies as inline JSON strings (use `body("{ \\"field\\": \\"value\\" }")`)
+- Keep each test self-contained — no shared mutable state between tests
+- Add a brief comment above each test referencing its TC-ID
+
+## Package and class structure
+```java
+package com.autopilot.api;
+
+import io.restassured.RestAssured;
+import io.restassured.http.ContentType;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.*;
+
+public class ApiTests {
+
+    @BeforeAll
+    static void setup() {
+        RestAssured.baseURI = System.getProperty("base.url", "http://localhost:3000");
+    }
+
+    // tests here
+}
+```
+
+## What NOT to do
+- Do not generate tests for UI or E2E scenarios
+- Do not add Spring Boot test context or Mockito — pure RestAssured only
+- Do not generate Maven pom.xml or build files — just the test class
+- Do not invent endpoints or request shapes not stated in the scenario steps
+"""
+
+
+def build_playwright_prompt(scenarios_content: str) -> str:
+    """Build the user prompt for Playwright code generation."""
+    return "\n".join([
+        "# Finalized Test Scenarios",
+        "",
+        scenarios_content.strip(),
+        "",
+        "---",
+        "",
+        "Generate Playwright TypeScript spec files for all UI and E2E scenarios above.",
+        "Use the // ===FILE: filename.spec.ts=== marker to separate each file.",
+        "Skip API-type scenarios (those are handled by RestAssured).",
+        "Follow the file marker format exactly — the output will be parsed by a script.",
+    ])
+
+
+def build_restassured_prompt(scenarios_content: str) -> str:
+    """Build the user prompt for RestAssured code generation."""
+    return "\n".join([
+        "# Finalized Test Scenarios",
+        "",
+        scenarios_content.strip(),
+        "",
+        "---",
+        "",
+        "Generate a RestAssured Java test class (ApiTests.java) for all API-type scenarios above.",
+        "Ignore UI and E2E scenarios.",
+        "Output only the Java file content — no markdown fences, no explanation text.",
+    ])

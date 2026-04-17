@@ -14,12 +14,13 @@ application in a structured YAML file (the "Application Knowledge File") and let
 an AI agent generate the test scenarios for you.
 
 **v0.1 scope:** Knowledge file → Manual test scenarios (Markdown)
-**v0.1.1 (this version):** + Reviewer Agent — two-agent generate → review pipeline
-**Roadmap:** + Crawler → + Code generation (Java Page Objects / RestAssured)
+**v0.1.1:** + Reviewer Agent — two-agent generate → review pipeline
+**v0.2 (this version):** + Code Generator Agent — Playwright TypeScript + RestAssured Java output
+**Roadmap:** + Crawler → + Change-aware test regeneration
 
 ---
 
-## Architecture (v0.1.1 — two-agent pipeline)
+## Architecture (v0.2 — four-agent pipeline)
 
 ```
 ┌─────────────────────────────────────┐
@@ -54,9 +55,28 @@ an AI agent generate the test scenarios for you.
                 │
                 ▼
 ┌─────────────────────────────────────┐
-│  output/test-scenarios-final.md     │  ← Deliverable
-│  (Review Summary + TC-001 … TC-N)   │
-└─────────────────────────────────────┘
+│  output/test-scenarios-final.md     │  ← Human-readable deliverable
+│  (Review Summary + TC-001 … TC-N)   │     also input to Code Generator
+└───────────────┬─────────────────────┘
+                │  (finalized scenarios only — not the knowledge file)
+                ▼
+┌─────────────────────────────────────┐
+│      Code Generator Agent           │  autopilot_qa/code_generator.py
+│                                     │
+│  Call 1: Playwright TypeScript      │  All UI/E2E categories, one spec per category
+│          File markers split output  │  // ===FILE: smoke.spec.ts===
+│                                     │
+│  Call 2: RestAssured Java           │  API scenarios → ApiTests.java
+└───────────────┬─────────────────────┘
+                │
+                ▼
+┌──────────────────────────────────────────────────┐
+│  output/playwright/smoke.spec.ts                 │
+│  output/playwright/regression.spec.ts            │  ← Executable Playwright tests
+│  output/playwright/edge-cases.spec.ts            │
+│  output/playwright/negative.spec.ts              │
+│  output/restassured/ApiTests.java                │  ← Executable RestAssured tests
+└──────────────────────────────────────────────────┘
 ```
 
 **CLI modes:**
@@ -69,6 +89,15 @@ python run.py knowledge/app-knowledge.yaml --review
 
 # Review an existing draft without regenerating
 python run.py knowledge/app-knowledge.yaml --review-only output/draft-scenarios.md
+
+# Full pipeline including code generation (generate + review + codegen)
+python run.py knowledge/app-knowledge.yaml --codegen
+
+# Code generation only (from existing finalized scenarios)
+python run.py --codegen-only output/test-scenarios-final.md
+
+# Full four-agent pipeline (build knowledge + generate + review + codegen)
+python run.py --build-knowledge knowledge-config.yaml --codegen
 ```
 
 ---
@@ -302,6 +331,125 @@ truth; the draft is the thing being evaluated against it.
 
 ---
 
+---
+
+## ADR-009: One Claude call per output format (Playwright vs RestAssured)
+
+**Decision:** Make exactly two Claude calls for code generation — one for all
+Playwright TypeScript files and one for the RestAssured Java class. Not one call
+per test case, not one call per category, not one combined call for both languages.
+
+**Why:**
+
+TypeScript and Java have very different structural conventions (test runner APIs,
+import styles, class vs module layout, assertion libraries). A single call asked
+to produce both would need to context-switch between paradigms mid-response and
+typically produces lower-quality output in both. Two focused calls, each with a
+role-specific system prompt ("senior Playwright engineer" vs "senior Java automation
+engineer"), produce cleaner, more idiomatic code.
+
+One call per test case would scale linearly with test count — a 30-scenario suite
+would require 30 API calls. One pass for all categories is an explicit performance
+constraint enforced in `strategy_v02.md`.
+
+**Trade-off:** A single combined call would be simpler to orchestrate. We accept
+the extra call because code quality is more important than call count here.
+
+---
+
+## ADR-010: File markers for multi-file Playwright output
+
+**Decision:** Ask Claude to delimit each spec file with a `// ===FILE: filename.spec.ts===`
+marker in its response; parse and split client-side.
+
+**Why:**
+
+We want one `.spec.ts` per test category (smoke, regression, edge-cases, negative)
+but making one API call per category would multiply cost linearly. The file marker
+pattern gives us multi-file output from a single call.
+
+The marker format (`// ===FILE:` ... `===`) is a TypeScript comment — syntactically
+valid even if not split correctly, which means the fallback (write everything to
+`tests.spec.ts`) still produces runnable code rather than broken files.
+
+The parser lives in `_split_playwright_files()` in `code_generator.py`. It falls
+back to a single `tests.spec.ts` if no markers are found, so no content is ever
+silently dropped if Claude doesn't follow the format.
+
+---
+
+## ADR-011: Finalized scenarios Markdown as the code generator's input (not the AKF)
+
+**Decision:** The Code Generator Agent takes `output/test-scenarios-final.md` as
+its input — not `app-knowledge.yaml`.
+
+**Why:**
+
+The finalized scenarios are the human-readable specification for what the tests
+should do. If a scenario is written correctly (precise steps, observable results,
+real test data), the code agent can implement it mechanically without re-reading
+the knowledge file.
+
+This decoupling means:
+1. The code agent can run independently on **any** well-formed scenarios file —
+   including hand-written ones, not just AutoPilot-generated ones (`--codegen-only`).
+2. The knowledge file is not re-parsed at this stage — each agent in the pipeline
+   has a single, clear input.
+3. The scenarios file is already the Reviewer Agent's polished output — it's the
+   closest thing to a human-authored spec that the pipeline produces.
+
+**Trade-off:** If the scenarios file omits detail that was in the AKF (e.g. a
+specific error code), the generated code won't know about it. The scenarios file
+must be complete for code quality to be high — which is exactly what the Reviewer
+Agent is designed to ensure.
+
+---
+
+## Code Generator Prompt Engineering Notes
+
+### Playwright system prompt design
+
+**Role framing:** "Senior automation engineer specialising in Playwright with TypeScript"
+gives Claude a precise persona that strongly influences idiom choices (e.g.
+`page.locator()` over `page.$()`, `expect().toBeVisible()` over manual assertions).
+
+**`BASE_URL` env var pattern:**
+```typescript
+const BASE_URL = process.env.BASE_URL ?? 'http://localhost:3000';
+```
+Explicitly specified in the prompt so every generated spec is environment-portable
+without manual editing after generation.
+
+**TC-ID as test name:**
+```typescript
+test('TC-001: Create a new wish list', async ({ page }) => {
+```
+Embedding the TC-ID in the test name creates a direct traceability link between
+the Markdown scenario and the executable test. When a test fails in CI, the TC-ID
+in the failure message maps directly back to the scenario document.
+
+**"Do not mock network calls"** is explicit in the prompt because Claude has a
+strong prior toward mocking in generated tests. We want tests against the real app.
+
+### RestAssured system prompt design
+
+**`@BeforeAll` base URI pattern:**
+```java
+RestAssured.baseURI = System.getProperty("base.url", "http://localhost:3000");
+```
+System property allows CI to override the URL without code changes.
+
+**`@DisplayName` with TC-ID:**
+```java
+@DisplayName("TC-015: POST /api/lists returns 201 with valid payload")
+```
+Same traceability rationale as Playwright — test runner output maps to the scenario doc.
+
+**"No Spring Boot context, no Mockito"** prevents Claude from generating heavyweight
+test infrastructure. These are integration tests; all they need is RestAssured + JUnit5.
+
+---
+
 ## Tools Used
 
 | Tool | Version | Purpose |
@@ -309,16 +457,20 @@ truth; the draft is the thing being evaluated against it.
 | Python | 3.11+ | Orchestration language |
 | `anthropic` SDK | >=0.40 | Claude API client — streaming, typed |
 | `pyyaml` | >=6.0 | YAML parsing for knowledge files |
-| Claude Sonnet 4.6 | - | Generator Agent + Reviewer Agent |
+| Claude Sonnet 4.6 | - | All four agents (Knowledge Builder, Generator, Reviewer, Code Generator) |
+
+**Generated artifacts (not runtime dependencies — output only):**
+| Output format | Runtime requirements |
+|--------------|---------------------|
+| Playwright TypeScript (`.spec.ts`) | `@playwright/test` npm package, Node.js |
+| RestAssured Java (`ApiTests.java`) | RestAssured + JUnit 5, Java 11+, Maven/Gradle |
 
 **Future add-ons (not yet wired):**
 | Tool | Purpose |
 |------|---------|
-| `playwright` | Browser crawler for live app DOM capture |
-| `beautifulsoup4` | HTML element extraction |
-| `langgraph` | Multi-agent pipeline orchestration |
+| `playwright` | Browser crawler for live app DOM capture (v0.3) |
+| `beautifulsoup4` | HTML element extraction (v0.3) |
 | `jsonschema` | Knowledge file schema validation |
-| Java / Maven | Generated test artifact compilation + execution |
 
 ---
 
@@ -414,15 +566,29 @@ python run.py knowledge/app-knowledge.yaml --review
 
 ## What's Next (Roadmap)
 
-### v0.2 — Crawler add-on
-Add `crawler/agents/crawl_agent.py` as an optional step that enriches the
-knowledge file with live DOM snapshots before generation. The generator picks
-up a `crawl_result` key in the state if present.
+### v0.2 ✅ — Code Generator Agent (SHIPPED 2026-04-17)
+Added `autopilot_qa/code_generator.py` as the fourth pipeline step. Generates
+Playwright TypeScript spec files and a RestAssured Java test class from the
+Reviewer Agent's finalized scenarios. See ADR-009 through ADR-011.
 
-### v0.3 — Code generation
-Add `--output-format java` to `run.py` to trigger the Java Page Object /
-RestAssured client generator alongside (or instead of) the markdown scenarios.
+### v0.3 — Crawler Add-on (AKF enrichment)
+Add an optional crawler step before the Generator Agent that inspects the live
+DOM of the application under test and enriches the `app-knowledge.yaml` with
+discovered routes, form fields, and API endpoints. The crawler output is additive
+— the AKF remains the source of truth.
 
-### v0.4 — Test management tool export
-Add `--format xray-json` / `--format testrail-csv` to convert the generated
-scenarios into import-ready formats for popular test management tools.
+CLI target: `python run.py --crawl http://localhost:3000 knowledge/app-knowledge.yaml --codegen`
+
+### v0.4 — Change-Aware Test Regeneration *(key strategic differentiator)*
+When the application changes, supply a diff or changelog alongside the AKF.
+AutoPilot QA identifies which parts of the AKF are affected and regenerates
+**only** the impacted scenarios and automation scripts — not the full suite.
+
+Outputs: `output/delta-scenarios.md`, `output/delta-playwright/`, `output/change-impact-report.md`
+
+This transforms AutoPilot QA from a one-shot generator into a living test system
+that evolves with the application.
+
+### v0.5 — Test Management Export
+Convert generated scenarios to Xray JSON, TestRail CSV, or Zephyr Scale JSON
+for one-click import into popular test management tools.
