@@ -1,10 +1,10 @@
 # AutoPilot QA
 
-> AI-native test scenario generator — describe your app, get manual test cases.
+> AI-native test automation platform — describe your app, get manual test scenarios and executable automation scripts.
 
-AutoPilot QA reads an **Application Knowledge File** and uses the Claude API to generate comprehensive **manual test scenarios** in Markdown via a two-agent pipeline.
+AutoPilot QA reads an **Application Knowledge File** and uses the Claude API to generate comprehensive **manual test scenarios** and **executable Playwright + RestAssured tests** via a four-agent pipeline.
 
-The AKF (Application Knowledge File) is the backbone for this utility. It's essentially passing over accplication knowledge as part of context to the LLM.
+The AKF (Application Knowledge File) is the backbone for this utility. It's essentially passing over application knowledge as part of context to the LLM.
 
 No browser. No live app access. No boilerplate to write.
 
@@ -21,11 +21,13 @@ cp knowledge-config.example.yaml knowledge-config.yaml
 pip install -r requirements.txt
 export ANTHROPIC_API_KEY=sk-ant-...
 
-# 3. Run the full pipeline
-python run.py --build-knowledge knowledge-config.yaml --review
+# 3. Run the full pipeline (scenarios + code generation)
+python run.py --build-knowledge knowledge-config.yaml --codegen
 
-# 4. Open your test scenarios
-open output/test-scenarios-final.md
+# 4. Open your outputs
+open output/test-scenarios-final.md   # manual test scenarios
+open output/playwright/               # Playwright TypeScript spec files
+open output/restassured/ApiTests.java # RestAssured Java test class
 ```
 
 ---
@@ -46,7 +48,11 @@ knowledge-config.yaml       ← you configure this (single control point)
         │
         ▼
  Reviewer Agent        ──►  output/test-scenarios-final.md  ✓
- (workflow + coverage lens)      (this is your deliverable)
+ (workflow + coverage lens)      (human-readable deliverable)
+        │
+        ▼
+ Code Generator        ──►  output/playwright/*.spec.ts
+ (Playwright + RestAssured)  output/restassured/ApiTests.java  ✓
 ```
 
 **Knowledge Builder** — collects context from up to three sources you configure: a human description of your app, your source code repository (local or GitHub), and any supporting documentation. Feeds it all to Claude to produce the `app-knowledge.yaml`.
@@ -54,6 +60,10 @@ knowledge-config.yaml       ← you configure this (single control point)
 **Generator Agent** — reads the knowledge file and generates draft scenarios covering all routes, API endpoints, and entity states.
 
 **Reviewer Agent** — reads both the knowledge file and the draft. Applies a workflow lens (can a real user complete their goal end-to-end?) and a coverage lens (is every documented behaviour tested?). Outputs a Review Summary and the finalized scenario set.
+
+**Code Generator Agent** — reads the finalized scenarios and generates executable automation code:
+- **Playwright (TypeScript)** — one `.spec.ts` per test category (smoke, regression, edge-cases, negative)
+- **RestAssured (Java)** — a single `ApiTests.java` class for all API scenarios
 
 The final output covers:
 - **Smoke** — critical path, broken-build-blocking only
@@ -69,6 +79,8 @@ The final output covers:
 - **Python 3.11+** — check with `python --version`
 - **Anthropic API key** — get one at [console.anthropic.com](https://console.anthropic.com)
 - **`gh` CLI** (optional) — only needed if reading from a GitHub repo
+- **Node.js + `@playwright/test`** (optional) — only needed to *run* the generated Playwright specs
+- **Java 11+ + Maven/Gradle** (optional) — only needed to *run* the generated RestAssured tests
 
 ---
 
@@ -113,24 +125,34 @@ Copy `knowledge-config.example.yaml` to get started — it has all options docum
 ## CLI reference
 
 ```bash
-# Full pipeline: build knowledge → generate → review  (recommended)
+# Full pipeline: build knowledge → generate → review → codegen  (recommended)
+python run.py --build-knowledge knowledge-config.yaml --codegen
+
+# Full pipeline without code generation
 python run.py --build-knowledge knowledge-config.yaml --review
 
 # Build knowledge file only
 python run.py --build-knowledge knowledge-config.yaml
 
+# Generate + review + codegen from an existing knowledge file
+python run.py knowledge/app-knowledge.yaml --codegen
+
 # Generate + review from an existing knowledge file
 python run.py knowledge/app-knowledge.yaml --review
 
-# Generate only (single agent, faster)
+# Generate only (single agent, fastest)
 python run.py knowledge/app-knowledge.yaml
 
 # Review an existing draft without regenerating
 python run.py knowledge/app-knowledge.yaml --review-only output/draft-scenarios.md
 
+# Code generation only (from an existing finalized scenarios file)
+python run.py --codegen-only output/test-scenarios-final.md
+
 # Options
   --output PATH           Override default output file path
   --draft-output PATH     Where to save the generator draft (default: output/draft-scenarios.md)
+  --codegen-output DIR    Root directory for generated code (default: output)
   --model MODEL           Claude model for all agents (default: claude-sonnet-4-6)
   --no-stream             Wait for full response before printing
 ```
@@ -138,6 +160,8 @@ python run.py knowledge/app-knowledge.yaml --review-only output/draft-scenarios.
 ---
 
 ## Example output
+
+**Manual test scenario (`output/test-scenarios-final.md`):**
 
 ```markdown
 ## TC-001: Create a Wish List (Happy Path)
@@ -163,6 +187,52 @@ python run.py knowledge/app-knowledge.yaml --review-only output/draft-scenarios.
 - Context: "Loves hiking, budget around £50"
 ```
 
+**Generated Playwright spec (`output/playwright/smoke.spec.ts`):**
+
+```typescript
+import { test, expect } from '@playwright/test';
+
+const BASE_URL = process.env.BASE_URL ?? 'http://localhost:3000';
+
+test.describe('Smoke Tests', () => {
+  test('TC-001: Create a Wish List (Happy Path)', async ({ page }) => {
+    // Navigate to home page
+    await page.goto(BASE_URL);
+    await expect(page.locator('text=I\'m wishing')).toBeVisible();
+
+    // Start wisher flow
+    await page.locator('text=I\'m wishing').click();
+    await expect(page).toHaveURL(`${BASE_URL}/wisher`);
+
+    // Fill occasion and trigger AI suggestions
+    await page.locator('[placeholder*="occasion"]').fill('30th Birthday');
+    await page.locator('text=Find Gifts').click();
+
+    // Wait for AI suggestions
+    await page.waitForSelector('[data-testid="suggestions-grid"]', { timeout: 30000 });
+  });
+});
+```
+
+**Generated RestAssured test (`output/restassured/ApiTests.java`):**
+
+```java
+// TC-015: POST /api/lists returns 201 with valid payload
+@Test
+@DisplayName("TC-015: POST /api/lists returns 201 with valid payload")
+void postListsReturns201() {
+    given()
+        .contentType(ContentType.JSON)
+        .body("{ \"name\": \"30th Birthday\", \"occasion\": \"Birthday\" }")
+    .when()
+        .post("/api/lists")
+    .then()
+        .statusCode(201)
+        .body("id", notNullValue())
+        .body("name", equalTo("30th Birthday"));
+}
+```
+
 ---
 
 ## Project structure
@@ -178,12 +248,20 @@ autopilot-qa/
 │   ├── knowledge_builder.py       ← Knowledge Builder Agent
 │   ├── generator.py               ← Generator Agent
 │   ├── reviewer.py                ← Reviewer Agent
+│   ├── code_generator.py          ← Code Generator Agent (Playwright + RestAssured)
 │   └── prompts.py                 ← all prompt templates with design rationale
 ├── docs/
 │   └── design.md                  ← ADRs, prompt engineering notes, tool choices
 ├── output/                        ← generated artifacts (gitignored)
 │   ├── draft-scenarios.md         ← Generator Agent output
-│   └── test-scenarios-final.md    ← Reviewer Agent output (the deliverable)
+│   ├── test-scenarios-final.md    ← Reviewer Agent output
+│   ├── playwright/                ← Playwright spec files (one per category)
+│   │   ├── smoke.spec.ts
+│   │   ├── regression.spec.ts
+│   │   ├── edge-cases.spec.ts
+│   │   └── negative.spec.ts
+│   └── restassured/
+│       └── ApiTests.java          ← RestAssured test class
 ├── run.py                         ← CLI entry point
 └── requirements.txt
 ```
@@ -195,8 +273,10 @@ autopilot-qa/
 See [`docs/design.md`](docs/design.md) for:
 - Why a config file as the single control point (not CLI flags)
 - Source trust hierarchy (prompt > code > docs) and why
-- Why the knowledge file is generated, not hand-authored
 - Two-agent pipeline rationale (generator vs reviewer)
+- Why code generation uses one Claude call per output format (not one per test case)
+- File marker pattern for multi-file Playwright output
+- Why the code generator takes scenarios Markdown as input, not the knowledge file
 - Prompt engineering notes — what worked, what didn't
 
 ---
@@ -208,9 +288,10 @@ See [`docs/design.md`](docs/design.md) for:
 | **v0.1** ✅ | Knowledge file → manual test scenarios (Generator Agent) |
 | **v0.1.1** ✅ | Reviewer Agent — two-agent generate → review pipeline |
 | **v0.1.2** ✅ | Knowledge Builder — generate knowledge file from prompt + code + docs |
-| v0.2 | Crawler add-on — enrich knowledge with live DOM via Playwright |
-| v0.3 | Code generation — Java Page Objects + RestAssured API clients |
-| v0.4 | Test management export — Xray JSON, TestRail CSV |
+| **v0.2** ✅ | Code Generator Agent — Playwright TypeScript + RestAssured Java output |
+| v0.3 | Crawler add-on — enrich knowledge with live DOM via Playwright |
+| v0.4 | Change-aware regeneration — diff-driven targeted test updates |
+| v0.5 | Test management export — Xray JSON, TestRail CSV |
 
 ---
 
