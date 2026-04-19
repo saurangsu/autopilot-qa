@@ -32,7 +32,7 @@ open output/restassured/ApiTests.java # RestAssured Java test class
 
 ---
 
-## How it works
+## How it works (Workflow)
 
 ```
 knowledge-config.yaml       ← you configure this (single control point)
