@@ -15,12 +15,13 @@ an AI agent generate the test scenarios for you.
 
 **v0.1 scope:** Knowledge file → Manual test scenarios (Markdown)
 **v0.1.1:** + Reviewer Agent — two-agent generate → review pipeline
-**v0.2 (this version):** + Code Generator Agent — Playwright TypeScript + RestAssured Java output
+**v0.2:** + Knowledge Builder — generate knowledge file from prompt + code + docs
+**v0.3 (this version):** + Code Generator Agent — Playwright TypeScript + RestAssured Java output
 **Roadmap:** + Crawler → + Change-aware test regeneration
 
 ---
 
-## Architecture (v0.2 — four-agent pipeline)
+## Architecture (v0.3 — four-agent pipeline)
 
 ```
 ┌─────────────────────────────────────┐
@@ -135,7 +136,7 @@ any other tool-specific format.
 - It's trivially parseable downstream — a second agent can convert Markdown
   tables to any target format. Start generic, specialise later.
 
-**Trade-off:** Can't one-click import into TestRail. That's a v0.3 problem.
+**Trade-off:** Can't one-click import into TestRail. That's a v0.6 problem.
 
 ---
 
@@ -468,8 +469,8 @@ test infrastructure. These are integration tests; all they need is RestAssured +
 **Future add-ons (not yet wired):**
 | Tool | Purpose |
 |------|---------|
-| `playwright` | Browser crawler for live app DOM capture (v0.3) |
-| `beautifulsoup4` | HTML element extraction (v0.3) |
+| `playwright` | Browser crawler for live app DOM capture (v0.4) |
+| `beautifulsoup4` | HTML element extraction (v0.4) |
 | `jsonschema` | Knowledge file schema validation |
 
 ---
@@ -566,12 +567,18 @@ python run.py knowledge/app-knowledge.yaml --review
 
 ## What's Next (Roadmap)
 
-### v0.2 ✅ — Code Generator Agent (SHIPPED 2026-04-17)
+### v0.2 ✅ — Knowledge Builder Agent (SHIPPED 2026-04-17)
+Added `autopilot_qa/knowledge_builder.py` as the pipeline entry point. Collects
+context from up to three sources (human prompt, source repo, documentation files)
+and uses Claude to generate `app-knowledge.yaml` automatically. Driven by
+`knowledge-config.yaml` as the single control point. See ADR-006, ADR-007, ADR-008.
+
+### v0.3 ✅ — Code Generator Agent (SHIPPED 2026-04-30)
 Added `autopilot_qa/code_generator.py` as the fourth pipeline step. Generates
 Playwright TypeScript spec files and a RestAssured Java test class from the
 Reviewer Agent's finalized scenarios. See ADR-009 through ADR-011.
 
-### v0.3 — Crawler Add-on (AKF enrichment)
+### v0.4 — Crawler Add-on (AKF enrichment)
 Add an optional crawler step before the Generator Agent that inspects the live
 DOM of the application under test and enriches the `app-knowledge.yaml` with
 discovered routes, form fields, and API endpoints. The crawler output is additive
@@ -579,7 +586,7 @@ discovered routes, form fields, and API endpoints. The crawler output is additiv
 
 CLI target: `python run.py --crawl http://localhost:3000 knowledge/app-knowledge.yaml --codegen`
 
-### v0.4 — Change-Aware Test Regeneration *(key strategic differentiator)*
+### v0.5 — Change-Aware Test Regeneration *(key strategic differentiator)*
 When the application changes, supply a diff or changelog alongside the AKF.
 AutoPilot QA identifies which parts of the AKF are affected and regenerates
 **only** the impacted scenarios and automation scripts — not the full suite.
@@ -589,6 +596,6 @@ Outputs: `output/delta-scenarios.md`, `output/delta-playwright/`, `output/change
 This transforms AutoPilot QA from a one-shot generator into a living test system
 that evolves with the application.
 
-### v0.5 — Test Management Export
+### v0.6 — Test Management Export
 Convert generated scenarios to Xray JSON, TestRail CSV, or Zephyr Scale JSON
 for one-click import into popular test management tools.
