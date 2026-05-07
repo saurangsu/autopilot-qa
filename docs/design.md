@@ -16,19 +16,31 @@ an AI agent generate the test scenarios for you.
 **v0.1 scope:** Knowledge file → Manual test scenarios (Markdown)
 **v0.1.1:** + Reviewer Agent — two-agent generate → review pipeline
 **v0.2:** + Knowledge Builder — generate knowledge file from prompt + code + docs
-**v0.3 (this version):** + Code Generator Agent — Playwright TypeScript + RestAssured Java output
-**Roadmap:** + Crawler → + Change-aware test regeneration
+**v0.3:** + Code Generator Agent — Playwright TypeScript + RestAssured Java output
+**v0.4 (this version):** + Crawler Pipeline — live DOM enrichment via Playwright
+**Roadmap:** + Change-aware test regeneration
 
 ---
 
-## Architecture (v0.3 — four-agent pipeline)
+## Architecture (v0.4 — five-agent pipeline + optional crawler)
 
 ```
 ┌─────────────────────────────────────┐
 │       app-knowledge.yaml            │  ← Human-authored ground truth
 │   (routes, APIs, journeys, data)    │
 └───────────────┬─────────────────────┘
-                │
+                │  (optional enrichment step)
+                ▼
+┌─────────────────────────────────────┐
+│      Crawler Pipeline               │  run_crawler.py
+│                                     │
+│  1. CrawlAgent (BFS + Playwright)   │  crawler/agents/crawl_agent.py
+│  2. ExtractAgent (DOM + API)        │  crawler/agents/extract_agent.py
+│  3. GenerateAgent (Java artifacts)  │  crawler/agents/generate_agent.py
+│  4. ValidateAgent (Maven compile)   │  crawler/agents/validate_agent.py
+│     MonitorAgent (Claude-guided)    │  crawler/agents/monitor_agent.py
+└───────────────┬─────────────────────┘
+                │  enriched app-knowledge.yaml written back to disk
                 ▼
 ┌─────────────────────────────────────┐
 │      Generator Agent                │  autopilot_qa/generator.py
@@ -466,11 +478,15 @@ test infrastructure. These are integration tests; all they need is RestAssured +
 | Playwright TypeScript (`.spec.ts`) | `@playwright/test` npm package, Node.js |
 | RestAssured Java (`ApiTests.java`) | RestAssured + JUnit 5, Java 11+, Maven/Gradle |
 
+**Crawler pipeline dependencies (in `crawler/requirements.txt`):**
+| Tool | Purpose |
+|------|---------|
+| `playwright` | Browser automation — BFS page crawl and DOM capture |
+| `beautifulsoup4` | HTML element extraction from captured DOM |
+
 **Future add-ons (not yet wired):**
 | Tool | Purpose |
 |------|---------|
-| `playwright` | Browser crawler for live app DOM capture (v0.4) |
-| `beautifulsoup4` | HTML element extraction (v0.4) |
 | `jsonschema` | Knowledge file schema validation |
 
 ---
@@ -578,13 +594,14 @@ Added `autopilot_qa/code_generator.py` as the fourth pipeline step. Generates
 Playwright TypeScript spec files and a RestAssured Java test class from the
 Reviewer Agent's finalized scenarios. See ADR-009 through ADR-011.
 
-### v0.4 — Crawler Add-on (AKF enrichment)
-Add an optional crawler step before the Generator Agent that inspects the live
-DOM of the application under test and enriches the `app-knowledge.yaml` with
-discovered routes, form fields, and API endpoints. The crawler output is additive
-— the AKF remains the source of truth.
+### v0.4 ✅ — Crawler Pipeline (SHIPPED 2026-05-06)
+Added `crawler/` as an optional enrichment step that runs before scenario
+generation. A Playwright BFS crawler visits the live app, captures DOM snapshots
+and intercepted API calls, and enriches `app-knowledge.yaml` in-place. Four
+internal agents: CrawlAgent → ExtractAgent → GenerateAgent → ValidateAgent.
+A MonitoringAgent provides optional Claude-guided crawl direction.
 
-CLI target: `python run.py --crawl http://localhost:3000 knowledge/app-knowledge.yaml --codegen`
+CLI: `python run_crawler.py knowledge/app-knowledge.yaml`
 
 ### v0.5 — Change-Aware Test Regeneration *(key strategic differentiator)*
 When the application changes, supply a diff or changelog alongside the AKF.
@@ -596,6 +613,6 @@ Outputs: `output/delta-scenarios.md`, `output/delta-playwright/`, `output/change
 This transforms AutoPilot QA from a one-shot generator into a living test system
 that evolves with the application.
 
-### v0.6 — Test Management Export
+### v0.7 — Test Management Export
 Convert generated scenarios to Xray JSON, TestRail CSV, or Zephyr Scale JSON
 for one-click import into popular test management tools.

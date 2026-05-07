@@ -25,8 +25,8 @@ Kryptonite.md
 baby steps.rtf
 baby steps.rtf.sb-4faeb016-RiAar2
 
-# ── Old pipeline files (pre-pivot, not part of v0.1) ─────────────────────────
-crawler/
+# ── Crawler generated output (regenerated on demand) ─────────────────────────
+crawler/output/
 pom.xml
 src/
 target/
