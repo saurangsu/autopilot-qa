@@ -2,11 +2,11 @@
 
 > AI-native test automation platform — describe your app, get manual test scenarios and executable automation scripts.
 
-AutoPilot QA reads an **Application Knowledge File** and uses the Claude API to generate comprehensive **manual test scenarios** and **executable Playwright + RestAssured tests** via a four-agent pipeline.
+AutoPilot QA reads an **Application Knowledge File** and uses the Claude API to generate comprehensive **manual test scenarios** and **executable Playwright + RestAssured tests** via a multi-agent pipeline. An optional crawler enriches the knowledge file by inspecting the live DOM before generation.
 
 The AKF (Application Knowledge File) is the backbone for this utility. It's essentially passing over application knowledge as part of context to the LLM.
 
-No browser. No live app access. No boilerplate to write.
+No boilerplate to write. Live app access is optional — the crawler adds it when you need DOM-grounded accuracy.
 
 ---
 
@@ -42,6 +42,10 @@ knowledge-config.yaml       ← you configure this (single control point)
  (Claude reads your          (generated from your sources)
   prompt + code + docs)
         │
+        ▼ (optional)
+ Crawler Pipeline      ──►  knowledge/app-knowledge.yaml  (enriched)
+ (live DOM + API capture)    crawler/output/crawl_result.json
+        │
         ▼
  Generator Agent       ──►  output/draft-scenarios.md
  (breadth-first coverage)
@@ -56,6 +60,8 @@ knowledge-config.yaml       ← you configure this (single control point)
 ```
 
 **Knowledge Builder** — collects context from up to three sources you configure: a human description of your app, your source code repository (local or GitHub), and any supporting documentation. Feeds it all to Claude to produce the `app-knowledge.yaml`.
+
+**Crawler Pipeline** *(optional)* — launches a Playwright browser, crawls the live app, and enriches the knowledge file with discovered routes, form fields, selectors, and intercepted API calls. Run with `python run_crawler.py`. Four internal agents: Crawl → Extract → Generate Java artifacts → Validate. The knowledge file is updated in-place (original backed up as `.yaml.bak`).
 
 **Generator Agent** — reads the knowledge file and generates draft scenarios covering all routes, API endpoints, and entity states.
 
@@ -124,6 +130,8 @@ Copy `knowledge-config.example.yaml` to get started — it has all options docum
 
 ## CLI reference
 
+### Scenario pipeline (`run.py`)
+
 ```bash
 # Full pipeline: build knowledge → generate → review → codegen  (recommended)
 python run.py --build-knowledge knowledge-config.yaml --codegen
@@ -155,6 +163,32 @@ python run.py --codegen-only output/test-scenarios-final.md
   --codegen-output DIR    Root directory for generated code (default: output)
   --model MODEL           Claude model for all agents (default: claude-sonnet-4-6)
   --no-stream             Wait for full response before printing
+```
+
+### Crawler pipeline (`run_crawler.py`)
+
+```bash
+# Full crawler pipeline: crawl → extract → generate Java artifacts → validate
+python run_crawler.py knowledge/app-knowledge.yaml
+
+# Crawl + extract only (skip Java codegen)
+python run_crawler.py knowledge/app-knowledge.yaml --no-codegen
+
+# Run without MonitoringAgent (no Claude calls during crawl — faster)
+python run_crawler.py knowledge/app-knowledge.yaml --no-monitor
+
+# Run in headed mode (watch the browser)
+python run_crawler.py knowledge/app-knowledge.yaml --no-headless
+
+# Skip Claude enrichment in extract step (BeautifulSoup only)
+python run_crawler.py knowledge/app-knowledge.yaml --no-claude
+
+# Options
+  --browser chromium|firefox|webkit   Browser engine (default: chromium)
+  --max-depth N                        BFS depth limit (default: 3)
+  --max-pages N                        Hard cap on pages visited (default: 50)
+  --timeout MS                         Page load timeout in ms (default: 30000)
+  --output DIR                         Output directory (default: crawler/output)
 ```
 
 ---
@@ -250,6 +284,17 @@ autopilot-qa/
 │   ├── reviewer.py                ← Reviewer Agent
 │   ├── code_generator.py          ← Code Generator Agent (Playwright + RestAssured)
 │   └── prompts.py                 ← all prompt templates with design rationale
+├── crawler/
+│   ├── agents/
+│   │   ├── crawl_agent.py         ← BFS Playwright crawler
+│   │   ├── extract_agent.py       ← DOM element + API endpoint extractor
+│   │   ├── generate_agent.py      ← Java Page Object + API client generator
+│   │   ├── validate_agent.py      ← Maven compile validator
+│   │   ├── monitor_agent.py       ← Claude-guided crawl monitor
+│   │   └── interaction_agent.py   ← Interactive element handler
+│   ├── state.py                   ← Shared pipeline state models
+│   ├── validate_knowledge.py      ← Knowledge file validator
+│   └── requirements.txt           ← Crawler-specific dependencies
 ├── docs/
 │   └── design.md                  ← ADRs, prompt engineering notes, tool choices
 ├── output/                        ← generated artifacts (gitignored)
@@ -262,7 +307,8 @@ autopilot-qa/
 │   │   └── negative.spec.ts
 │   └── restassured/
 │       └── ApiTests.java          ← RestAssured test class
-├── run.py                         ← CLI entry point
+├── run.py                         ← Scenario pipeline CLI entry point
+├── run_crawler.py                 ← Crawler pipeline CLI entry point
 └── requirements.txt
 ```
 
@@ -287,11 +333,11 @@ See [`docs/design.md`](docs/design.md) for:
 |---------|---------|
 | **v0.1** ✅ | Knowledge file → manual test scenarios (Generator Agent) |
 | **v0.1.1** ✅ | Reviewer Agent — two-agent generate → review pipeline |
-| **v0.1.2** ✅ | Knowledge Builder — generate knowledge file from prompt + code + docs |
-| **v0.2** ✅ | Code Generator Agent — Playwright TypeScript + RestAssured Java output |
-| v0.3 | Crawler add-on — enrich knowledge with live DOM via Playwright |
-| v0.4 | Change-aware regeneration — diff-driven targeted test updates |
-| v0.5 | Test management export — Xray JSON, TestRail CSV |
+| **v0.2** ✅ | Knowledge Builder — generate knowledge file from prompt + code + docs |
+| **v0.3** ✅ | Code Generator Agent — Playwright TypeScript + RestAssured Java output |
+| **v0.4** ✅ | Crawler add-on — enrich knowledge with live DOM via Playwright |
+| v0.5 | Change-aware regeneration — diff-driven targeted test updates |
+| v0.6 | Test management export — Xray JSON, TestRail CSV |
 
 ---
 
