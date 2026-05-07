@@ -16,13 +16,12 @@ an AI agent generate the test scenarios for you.
 **v0.1 scope:** Knowledge file → Manual test scenarios (Markdown)
 **v0.1.1:** + Reviewer Agent — two-agent generate → review pipeline
 **v0.2:** + Knowledge Builder — generate knowledge file from prompt + code + docs
-**v0.3:** + Code Generator Agent — Playwright TypeScript + RestAssured Java output
-**v0.4 (this version):** + Crawler Pipeline — live DOM enrichment via Playwright
+**v0.3 (this version):** + Code Generator Agent + Crawler Pipeline — Playwright TypeScript, RestAssured Java, live DOM enrichment
 **Roadmap:** + Change-aware test regeneration
 
 ---
 
-## Architecture (v0.4 — five-agent pipeline + optional crawler)
+## Architecture (v0.3 — five-agent pipeline + optional crawler)
 
 ```
 ┌─────────────────────────────────────┐
@@ -130,7 +129,7 @@ app access, no browser, no OpenAPI spec required.
   alongside the test suite.
 
 **Trade-off:** The quality of generated tests is bounded by the quality of the
-knowledge file. Garbage in, garbage out. The crawler add-on (v0.2) addresses
+knowledge file. Garbage in, garbage out. The crawler add-on (v0.3) addresses
 this by grounding the knowledge file in actual DOM structure.
 
 ---
@@ -470,7 +469,7 @@ test infrastructure. These are integration tests; all they need is RestAssured +
 | Python | 3.11+ | Orchestration language |
 | `anthropic` SDK | >=0.40 | Claude API client — streaming, typed |
 | `pyyaml` | >=6.0 | YAML parsing for knowledge files |
-| Claude Sonnet 4.6 | - | All four agents (Knowledge Builder, Generator, Reviewer, Code Generator) |
+| Claude Sonnet 4.6 | - | All agents (Knowledge Builder, Generator, Reviewer, Code Generator, Crawler Monitor) |
 
 **Generated artifacts (not runtime dependencies — output only):**
 | Output format | Runtime requirements |
@@ -594,7 +593,7 @@ Added `autopilot_qa/code_generator.py` as the fourth pipeline step. Generates
 Playwright TypeScript spec files and a RestAssured Java test class from the
 Reviewer Agent's finalized scenarios. See ADR-009 through ADR-011.
 
-### v0.4 ✅ — Crawler Pipeline (SHIPPED 2026-05-06)
+### v0.3 ✅ — Crawler Pipeline (SHIPPED 2026-05-06)
 Added `crawler/` as an optional enrichment step that runs before scenario
 generation. A Playwright BFS crawler visits the live app, captures DOM snapshots
 and intercepted API calls, and enriches `app-knowledge.yaml` in-place. Four
@@ -603,7 +602,7 @@ A MonitoringAgent provides optional Claude-guided crawl direction.
 
 CLI: `python run_crawler.py knowledge/app-knowledge.yaml`
 
-### v0.5 — Change-Aware Test Regeneration *(key strategic differentiator)*
+### v0.4 — Change-Aware Test Regeneration *(key strategic differentiator)*
 When the application changes, supply a diff or changelog alongside the AKF.
 AutoPilot QA identifies which parts of the AKF are affected and regenerates
 **only** the impacted scenarios and automation scripts — not the full suite.
@@ -613,6 +612,6 @@ Outputs: `output/delta-scenarios.md`, `output/delta-playwright/`, `output/change
 This transforms AutoPilot QA from a one-shot generator into a living test system
 that evolves with the application.
 
-### v0.7 — Test Management Export
+### v0.5 — Test Management Export
 Convert generated scenarios to Xray JSON, TestRail CSV, or Zephyr Scale JSON
 for one-click import into popular test management tools.

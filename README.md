@@ -334,10 +334,9 @@ See [`docs/design.md`](docs/design.md) for:
 | **v0.1** ✅ | Knowledge file → manual test scenarios (Generator Agent) |
 | **v0.1.1** ✅ | Reviewer Agent — two-agent generate → review pipeline |
 | **v0.2** ✅ | Knowledge Builder — generate knowledge file from prompt + code + docs |
-| **v0.3** ✅ | Code Generator Agent — Playwright TypeScript + RestAssured Java output |
-| **v0.4** ✅ | Crawler add-on — enrich knowledge with live DOM via Playwright |
-| v0.5 | Change-aware regeneration — diff-driven targeted test updates |
-| v0.6 | Test management export — Xray JSON, TestRail CSV |
+| **v0.3** ✅ | Code Generator Agent (Playwright + RestAssured) + Crawler Pipeline (live DOM enrichment) |
+| v0.4 | Change-aware regeneration — diff-driven targeted test updates |
+| v0.5 | Test management export — Xray JSON, TestRail CSV |
 
 ---
 
